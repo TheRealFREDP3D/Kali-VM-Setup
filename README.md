@@ -2,9 +2,10 @@
 
 Automated setup for a Kali Linux Virtual Machine optimized for Capture The Flag (CTF) competitions.
 
-> **Date:** June 19, 2025  
+> **Date:** September 21, 2025  
 > **Tested On:** Kali Linux 2025.x  
-> **Author:** Fred  
+> **Author:** Frederick Pellerin  
+> **Website:** [www.therealfred.ca](https://www.therealfred.ca)    
 > **License:** MIT
 
 ## 📋 Overview
