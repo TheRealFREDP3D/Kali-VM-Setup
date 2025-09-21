@@ -33,12 +33,12 @@ The modular approach allows you to selectively install only the tools you need, 
 
 2. **Make it Executable**
    ```bash
-   chmod +x ctf_setup.sh
+   chmod +x install.sh
    ```
 
 3. **Run as Root**
    ```bash
-   sudo ./ctf_setup.sh
+   sudo ./install.sh
    ```
 
 The script will prompt you to install optional components.
