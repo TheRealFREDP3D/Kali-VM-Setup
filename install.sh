@@ -1,5 +1,5 @@
+#!/bin/sh
 # install.sh
-#!/bin/bash
 
 # Kali Linux CTF VM Setup Script
 # Automates the setup of a Kali Linux VM for CTF competitions
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 NON_INTERACTIVE=false
-if [[ "$1" == "--yes-to-all" ]]; then
+if [ "$1" = "--yes-to-all" ]; then
     NON_INTERACTIVE=true
 fi
 
@@ -33,13 +33,18 @@ log() {
 # Function to check for required dependencies
 check_dependencies() {
     log "Checking for required dependencies"
-    local dependencies=("git" "curl" "wget")
-    for dep in "${dependencies[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            log "${RED}Error: Dependency '$dep' is not installed. Please install it before running this script.${NC}"
-            exit 1
-        fi
-    done
+    if ! command -v "git" >/dev/null 2>&1; then
+        log "${RED}Error: Dependency 'git' is not installed. Please install it before running this script.${NC}"
+        exit 1
+    fi
+    if ! command -v "curl" >/dev/null 2>&1; then
+        log "${RED}Error: Dependency 'curl' is not installed. Please install it before running this script.${NC}"
+        exit 1
+    fi
+    if ! command -v "wget" >/dev/null 2>&1; then
+        log "${RED}Error: Dependency 'wget' is not installed. Please install it before running this script.${NC}"
+        exit 1
+    fi
     log "${GREEN}All dependencies are satisfied${NC}"
 }
 
@@ -59,7 +64,8 @@ prompt_yes_no() {
         return 0
     fi
     while true; do
-        read -p "$1 [y/N]: " yn
+        printf "%s" "$1 [y/N]: "
+        read yn
         case $yn in
             [Yy]* ) return 0 ;;
             [Nn]* | "" ) return 1 ;;
