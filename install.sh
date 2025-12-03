@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # install.sh
 
 # Kali Linux CTF VM Setup Script
@@ -312,7 +312,8 @@ ufw allow out https
 ufw allow out domain
 ufw enable
 check_error "Firewall configuration"
-systemctl disable bluetooth cups
+systemctl disable bluetooth 2>/dev/null || true
+systemctl disable cups 2>/dev/null || true
 check_error "Disabling unnecessary services"
 
 # 6. Editors & Note-Taking
@@ -416,7 +417,7 @@ ufw status >> "$LOG_FILE"
 nmap --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}Nmap verification failed${NC}"
 burpsuite --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}Burp Suite verification failed${NC}"
 sqlmap --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}SQLMap verification failed${NC}"
-john --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}John verification failed${NC}"
+john | head -1 >> "$LOG_FILE" 2>&1 || log "${YELLOW}John verification failed${NC}"
 [ -d "/home/$TARGET_USER/tools/SecLists" ] && (ls "/home/$TARGET_USER/tools/SecLists/Passwords" >> "$LOG_FILE" 2>&1 || log "${YELLOW}SecLists verification failed${NC}")
 
 # Summary of failures
