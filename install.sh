@@ -19,6 +19,12 @@ prompt_target_user() {
         read -p "Which user directory should tools be installed in? [kali]: " target_user
         target_user=${target_user:-kali}  # Default to "kali" if empty
         
+        # Sanitize user input to prevent path traversal
+        if [[ "$target_user" =~ / ]]; then
+            echo -e "${RED}Error: Username cannot contain '/' characters.${NC}"
+            continue
+        fi
+        
         # Check if user directory exists
         if [ -d "/home/$target_user" ]; then
             echo -e "${GREEN}Using user directory: /home/$target_user${NC}"
@@ -33,8 +39,12 @@ prompt_target_user() {
                     TARGET_USER="$target_user"
                     break
                 else
-                    echo -e "${RED}Failed to create user directory${NC}"
+                    echo -e "${RED}Failed to create user directory. Aborting.${NC}"
+                    exit 1
                 fi
+            else
+                echo -e "${YELLOW}Cannot proceed without a target directory. Aborting.${NC}"
+                exit 1
             fi
         fi
     done
@@ -135,12 +145,13 @@ apt install -y \
     python3 python3-pip ruby perl golang make build-essential
 check_error "Core tools installation"
 
-install_core_tools() {
-    log "Installing core tools"
+# 2.2 Reconnaissance Tools
+if prompt_yes_no "Install reconnaissance tools (gobuster, ffuf, amass, etc.)?"; then
+    log "Installing reconnaissance tools"
     apt install -y \
-        nmap netcat tcpdump wireshark curl wget dnsutils git \
-        python3 python3-pip ruby perl golang make build-essential
-}
+        gobuster ffuf amass whatweb nikto enum4linux smbclient nbtscan masscan
+    check_error "Recon tools installation"
+fi
 
 # 2.3 Web Exploitation
 if prompt_yes_no "Install web exploitation tools (burpsuite, sqlmap, wfuzz, etc.)?"; then
@@ -158,32 +169,21 @@ if prompt_yes_no "Install reverse engineering tools (radare2, gdb, etc.)?"; then
     check_error "Reverse engineering tools installation"
 fi
 
-install_reverse_engineering_tools() {
-    if prompt_yes_no "Install reverse engineering tools (ghidra, radare2, gdb, etc.)?"; then
-        log "Installing reverse engineering tools"
-        apt install -y \
-            radare2 gdb peda binwalk apktool dex2jar jd-gui cutter
+# 2.5 Forensics
+if prompt_yes_no "Install forensics tools (foremost, sleuthkit, steghide, etc.)?"; then
+    log "Installing forensics tools"
+    apt install -y \
+        foremost sleuthkit steghide stegosuite
+    check_error "Forensics tools installation"
+fi
 
-        # Install Ghidra
-        log "Installing Ghidra"
-        apt install -y openjdk-17-jre
-        mkdir -p "$TOOLS_DIR"
-        (
-            cd "$TOOLS_DIR"
-            wget "https://github.com/NationalSecurityAgency/ghidra/releases/download/GHIDRA_${GHIDRA_VERSION}/ghidra_${GHIDRA_VERSION}.zip" -O ghidra.zip
-            unzip -o ghidra.zip
-            rm ghidra.zip
-        )
-    fi
-}
-
-install_forensics_tools() {
-    if prompt_yes_no "Install forensics tools (foremost, sleuthkit, steghide, etc.)?"; then
-        log "Installing forensics tools"
-        apt install -y \
-            foremost sleuthkit steghide stegosuite exiftool
-    fi
-}
+# 2.6 Password Cracking
+if prompt_yes_no "Install password cracking tools (john, hashcat, hydra, etc.)?"; then
+    log "Installing password cracking tools"
+    apt install -y \
+        john hashcat hydra medusa patator cupp crunch
+    check_error "Password cracking tools installation"
+fi
 
 # 2.7 Exploit Development
 if prompt_yes_no "Install exploit development tools (metasploit, pwntools, etc.)?"; then
@@ -194,6 +194,11 @@ if prompt_yes_no "Install exploit development tools (metasploit, pwntools, etc.)
 fi
 
 # 2.8 Python Environment
+# Create CTF directory first
+log "Creating CTF directory structure"
+mkdir -p "/home/$TARGET_USER/CTF"
+check_error "CTF directory creation"
+
 log "Setting up Python virtual environment"
 python3 -m venv "/home/$TARGET_USER/CTF/venv"
 check_error "Virtual environment creation"
@@ -204,6 +209,10 @@ check_error "Python packages installation"
 deactivate
 
 # 2.9 Additional Downloads
+# Create tools directory first
+mkdir -p "/home/$TARGET_USER/tools"
+check_error "Tools directory creation"
+
 if prompt_yes_no "Install SecLists? WARNING: This is a very large download (~2GB) containing extensive wordlists and payloads. Skip if you have limited bandwidth or storage space."; then
     log "Downloading SecLists"
     git clone https://github.com/danielmiessler/SecLists.git "/home/$TARGET_USER/tools/SecLists" || record_failure "SecLists clone"
@@ -212,9 +221,9 @@ else
 fi
 
 # 3. Directory Structure
-log "Creating CTF directory structure"
+log "Creating CTF subdirectories"
 mkdir -p "/home/$TARGET_USER/CTF"/{tools,notes,binaries,web,reversing,pwn,crypto,forensics,writeups}
-check_error "Directory creation"
+check_error "CTF subdirectories creation"
 
 # Initialize Git for notes
 log "Initializing Git for notes"
@@ -237,13 +246,12 @@ if [ ! -d "/home/$TARGET_USER/CTF/notes/.git" ]; then
 - Nmap: \`nmap -sC -sV -Pn <target>\`
 - Gobuster: \`gobuster dir -u <url> -w ~/tools/SecLists/Discovery/Web-Content/common.txt\`
 EOL
-            git add .
-            git commit -m "Initial CTF notes"
-        )
-    else
-        log "${YELLOW}Warning: Git repository already exists in notes directory. Skipping initialization.${NC}"
-    fi
-}
+    git add .
+    git commit -m "Initial CTF notes"
+    check_error "Git initialization"
+else
+    log "${YELLOW}Warning: Git repository already exists in notes directory. Skipping initialization.${NC}"
+fi
 
 # 4. Aliases and Bash Settings
 log "Configuring bash aliases"
@@ -283,7 +291,6 @@ extract () {
 }
 EOL
 check_error "Bash aliases configuration"
-source "/home/$TARGET_USER/.bashrc"
 
 # 5. Config Tweaks
 if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only in isolated VMs)?"; then
@@ -293,13 +300,30 @@ if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only 
     check_error "Passwordless sudo configuration"
 fi
 
-apply_config_tweaks() {
-    log "--- Applying Config Tweaks ---"
-    if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only in isolated VMs)?"; then
-        log "Enabling passwordless sudo"
-        echo "$KALI_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/kali
-        chmod 0440 /etc/sudoers.d/kali
-    fi
+log "Increasing file watch limits"
+echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
+sysctl -p
+check_error "File watch limits configuration"
+
+log "Configuring firewall"
+apt install -y ufw
+ufw allow out http
+ufw allow out https
+ufw allow out domain
+ufw enable
+check_error "Firewall configuration"
+systemctl disable bluetooth cups
+check_error "Disabling unnecessary services"
+
+# 6. Editors & Note-Taking
+log "Installing editors"
+apt install -y micro vim nano
+check_error "Editors installation"
+if prompt_yes_no "Install Visual Studio Code?"; then
+    log "Installing Visual Studio Code"
+    snap install code --classic
+    check_error "VS Code installation"
+fi
 
 # 7. Test Setup
 if prompt_yes_no "Install test environments (DVWA, Vulnix, CTF write-ups)?"; then
@@ -329,57 +353,39 @@ if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
     log "Installing Zsh and Oh My Zsh"
     apt install -y zsh
     check_error "Zsh installation"
-    su - "$TARGET_USER" -c "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
+    
+    # Securely download and run the Oh My Zsh installer
+    local oh_my_zsh_install_script
+    oh_my_zsh_install_script=$(mktemp)
+    if curl -fsSL "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" -o "$oh_my_zsh_install_script"; then
+        su - "$TARGET_USER" -c "sh '$oh_my_zsh_install_script' --unattended" || record_failure "Oh My Zsh installation"
+    else
+        record_failure "Oh My Zsh download"
+    fi
+    rm -f "$oh_my_zsh_install_script"
+    
     su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/plugins/zsh-autosuggestions"
     su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/plugins/zsh-syntax-highlighting"
-    echo "plugins=(git zsh-autosuggestions zsh-syntax-highlighting)" >> "/home/$TARGET_USER/.zshrc"
+    # Use sed to avoid duplicate entries if the script is re-run
+    su - "$TARGET_USER" -c "sed -i '/^plugins=/c\plugins=(git zsh-autosuggestions zsh-syntax-highlighting)' ~/.zshrc"
     chsh -s /bin/zsh "$TARGET_USER"
     check_error "Zsh configuration"
 fi
 
-install_test_environments() {
-    log "--- Installing Test Environments ---"
-    if prompt_yes_no "Install test environments (DVWA, Vulnix, CTF write-ups)?"; then
-        log "Installing test environments"
-        apt install -y docker.io
-        systemctl start docker
-        docker pull vulnerables/web-dvwa
-        apt install -y vulnix
-        git clone https://github.com/ctfs/write-ups-2014 "$CTF_DIR/writeups"
-    fi
-}
+# 8. Final Cleanup
+log "Performing cleanup"
+apt autoremove -y
+apt clean
+rm -rf "/home/$TARGET_USER/.cache/*" "/home/$TARGET_USER/tools/*.zip"
+history -c
+rm -rf "/home/$TARGET_USER/.bash_history"
+check_error "Cleanup"
 
-perform_cleanup() {
-    log "--- Performing Cleanup ---"
-    apt autoremove -y
-    apt clean
-    rm -rf "/home/$KALI_USER/.cache/*" "$TOOLS_DIR/*.zip"
-    history -c
-    rm -rf "/home/$KALI_USER/.bash_history"
-}
-
-install_optional_extras() {
-    log "--- Installing Optional Extras ---"
-    if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
-        log "Installing Zsh and Oh My Zsh"
-        apt install -y zsh fzf zsh-completions
-        su - "$KALI_USER" -c "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
-        su - "$KALI_USER" -c "git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
-        su - "$KALI_USER" -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
-        su - "$KALI_USER" -c "git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes/powerlevel10k"
-
-        # Configure .zshrc
-        ZSHRC_FILE="/home/$KALI_USER/.zshrc"
-        sed -i 's/ZSH_THEME=".*"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$ZSHRC_FILE"
-        sed -i 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-completions fzf)/' "$ZSHRC_FILE"
-
-        chsh -s /bin/zsh "$KALI_USER"
-    fi
-
-    if prompt_yes_no "Configure ProxyChains?"; then
-        log "Configuring ProxyChains"
-        apt install -y proxychains
-        cat <<EOL > /etc/proxychains.conf
+# 9. Optional Extras
+if prompt_yes_no "Configure ProxyChains?"; then
+    log "Configuring ProxyChains"
+    apt install -y proxychains
+    cat <<EOL > /etc/proxychains.conf
 dynamic_chain
 proxy_dns
 tcp_read_time_out 15000
@@ -388,7 +394,8 @@ tcp_connect_time_out 8000
 # Example: Tor
 socks5 127.0.0.1 9050
 EOL
-    fi
+    check_error "ProxyChains configuration"
+fi
 
 if prompt_yes_no "Install Nerd Fonts?"; then
     log "Installing Nerd Fonts"
@@ -410,7 +417,7 @@ nmap --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}Nmap verification failed${NC
 burpsuite --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}Burp Suite verification failed${NC}"
 sqlmap --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}SQLMap verification failed${NC}"
 john --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}John verification failed${NC}"
-ls "/home/$TARGET_USER/tools/SecLists/Passwords" >> "$LOG_FILE" 2>&1 || log "${YELLOW}SecLists verification failed${NC}"
+[ -d "/home/$TARGET_USER/tools/SecLists" ] && (ls "/home/$TARGET_USER/tools/SecLists/Passwords" >> "$LOG_FILE" 2>&1 || log "${YELLOW}SecLists verification failed${NC}")
 
 # Summary of failures
 if [ ${#FAILED_STEPS[@]} -gt 0 ]; then
