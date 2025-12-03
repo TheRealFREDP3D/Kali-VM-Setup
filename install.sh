@@ -1,5 +1,5 @@
+#!/bin/sh
 # install.sh
-#!/bin/bash
 
 # Kali Linux CTF VM Setup Script
 # Automates the setup of a Kali Linux VM for CTF competitions
@@ -46,6 +46,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+NON_INTERACTIVE=false
+if [ "$1" = "--yes-to-all" ]; then
+    NON_INTERACTIVE=true
+fi
+
 # Function to log messages
 log() {
     echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
@@ -76,8 +81,12 @@ check_error() {
 
 # Function to prompt user for confirmation
 prompt_yes_no() {
+    if [ "$NON_INTERACTIVE" = true ]; then
+        return 0
+    fi
     while true; do
-        read -p "$1 [y/N]: " yn
+        printf "%s" "$1 [y/N]: "
+        read yn
         case $yn in
             [Yy]* ) return 0 ;;
             [Nn]* | "" ) return 1 ;;
@@ -107,7 +116,6 @@ echo -e "Kali Linux CTF VM Setup Log\n" > "$LOG_FILE"
 # Update system
 log "Updating system"
 apt update && apt upgrade -y
-check_error "System update"
 
 # 1. Base VM Setup (Networking check)
 log "Checking network configuration"
@@ -127,13 +135,12 @@ apt install -y \
     python3 python3-pip ruby perl golang make build-essential
 check_error "Core tools installation"
 
-# 2.2 Reconnaissance Tools
-if prompt_yes_no "Install reconnaissance tools (gobuster, ffuf, amass, etc.)?"; then
-    log "Installing reconnaissance tools"
+install_core_tools() {
+    log "Installing core tools"
     apt install -y \
-        gobuster ffuf amass whatweb nikto enum4linux smbclient nbtscan masscan
-    check_error "Recon tools installation"
-fi
+        nmap netcat tcpdump wireshark curl wget dnsutils git \
+        python3 python3-pip ruby perl golang make build-essential
+}
 
 # 2.3 Web Exploitation
 if prompt_yes_no "Install web exploitation tools (burpsuite, sqlmap, wfuzz, etc.)?"; then
@@ -151,21 +158,32 @@ if prompt_yes_no "Install reverse engineering tools (radare2, gdb, etc.)?"; then
     check_error "Reverse engineering tools installation"
 fi
 
-# 2.5 Forensics
-if prompt_yes_no "Install forensics tools (foremost, sleuthkit, steghide, etc.)?"; then
-    log "Installing forensics tools"
-    apt install -y \
-        foremost sleuthkit steghide stegosuite
-    check_error "Forensics tools installation"
-fi
+install_reverse_engineering_tools() {
+    if prompt_yes_no "Install reverse engineering tools (ghidra, radare2, gdb, etc.)?"; then
+        log "Installing reverse engineering tools"
+        apt install -y \
+            radare2 gdb peda binwalk apktool dex2jar jd-gui cutter
 
-# 2.6 Password Cracking
-if prompt_yes_no "Install password cracking tools (john, hashcat, hydra, etc.)?"; then
-    log "Installing password cracking tools"
-    apt install -y \
-        john hashcat hydra medusa patator cupp crunch
-    check_error "Password cracking tools installation"
-fi
+        # Install Ghidra
+        log "Installing Ghidra"
+        apt install -y openjdk-17-jre
+        mkdir -p "$TOOLS_DIR"
+        (
+            cd "$TOOLS_DIR"
+            wget "https://github.com/NationalSecurityAgency/ghidra/releases/download/GHIDRA_${GHIDRA_VERSION}/ghidra_${GHIDRA_VERSION}.zip" -O ghidra.zip
+            unzip -o ghidra.zip
+            rm ghidra.zip
+        )
+    fi
+}
+
+install_forensics_tools() {
+    if prompt_yes_no "Install forensics tools (foremost, sleuthkit, steghide, etc.)?"; then
+        log "Installing forensics tools"
+        apt install -y \
+            foremost sleuthkit steghide stegosuite exiftool
+    fi
+}
 
 # 2.7 Exploit Development
 if prompt_yes_no "Install exploit development tools (metasploit, pwntools, etc.)?"; then
@@ -219,12 +237,13 @@ if [ ! -d "/home/$TARGET_USER/CTF/notes/.git" ]; then
 - Nmap: \`nmap -sC -sV -Pn <target>\`
 - Gobuster: \`gobuster dir -u <url> -w ~/tools/SecLists/Discovery/Web-Content/common.txt\`
 EOL
-    git add .
-    git commit -m "Initial CTF notes"
-    check_error "Git initialization"
-else
-    log "${YELLOW}Warning: Git repository already exists in notes directory. Skipping initialization.${NC}"
-fi
+            git add .
+            git commit -m "Initial CTF notes"
+        )
+    else
+        log "${YELLOW}Warning: Git repository already exists in notes directory. Skipping initialization.${NC}"
+    fi
+}
 
 # 4. Aliases and Bash Settings
 log "Configuring bash aliases"
@@ -274,30 +293,13 @@ if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only 
     check_error "Passwordless sudo configuration"
 fi
 
-log "Increasing file watch limits"
-echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
-sysctl -p
-check_error "File watch limits configuration"
-
-log "Configuring firewall"
-apt install -y ufw
-ufw allow out http
-ufw allow out https
-ufw allow out domain
-ufw enable
-check_error "Firewall configuration"
-systemctl disable bluetooth cups
-check_error "Disabling unnecessary services"
-
-# 6. Editors & Note-Taking
-log "Installing editors"
-apt install -y micro vim nano
-check_error "Editors installation"
-if prompt_yes_no "Install Visual Studio Code?"; then
-    log "Installing Visual Studio Code"
-    snap install code --classic
-    check_error "VS Code installation"
-fi
+apply_config_tweaks() {
+    log "--- Applying Config Tweaks ---"
+    if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only in isolated VMs)?"; then
+        log "Enabling passwordless sudo"
+        echo "$KALI_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/kali
+        chmod 0440 /etc/sudoers.d/kali
+    fi
 
 # 7. Test Setup
 if prompt_yes_no "Install test environments (DVWA, Vulnix, CTF write-ups)?"; then
@@ -335,11 +337,49 @@ if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
     check_error "Zsh configuration"
 fi
 
-if prompt_yes_no "Configure ProxyChains?"; then
-    log "Configuring ProxyChains"
-    apt install -y proxychains
-    check_error "ProxyChains installation"
-    cat <<EOL > /etc/proxychains.conf
+install_test_environments() {
+    log "--- Installing Test Environments ---"
+    if prompt_yes_no "Install test environments (DVWA, Vulnix, CTF write-ups)?"; then
+        log "Installing test environments"
+        apt install -y docker.io
+        systemctl start docker
+        docker pull vulnerables/web-dvwa
+        apt install -y vulnix
+        git clone https://github.com/ctfs/write-ups-2014 "$CTF_DIR/writeups"
+    fi
+}
+
+perform_cleanup() {
+    log "--- Performing Cleanup ---"
+    apt autoremove -y
+    apt clean
+    rm -rf "/home/$KALI_USER/.cache/*" "$TOOLS_DIR/*.zip"
+    history -c
+    rm -rf "/home/$KALI_USER/.bash_history"
+}
+
+install_optional_extras() {
+    log "--- Installing Optional Extras ---"
+    if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
+        log "Installing Zsh and Oh My Zsh"
+        apt install -y zsh fzf zsh-completions
+        su - "$KALI_USER" -c "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
+        su - "$KALI_USER" -c "git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
+        su - "$KALI_USER" -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
+        su - "$KALI_USER" -c "git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes/powerlevel10k"
+
+        # Configure .zshrc
+        ZSHRC_FILE="/home/$KALI_USER/.zshrc"
+        sed -i 's/ZSH_THEME=".*"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$ZSHRC_FILE"
+        sed -i 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-completions fzf)/' "$ZSHRC_FILE"
+
+        chsh -s /bin/zsh "$KALI_USER"
+    fi
+
+    if prompt_yes_no "Configure ProxyChains?"; then
+        log "Configuring ProxyChains"
+        apt install -y proxychains
+        cat <<EOL > /etc/proxychains.conf
 dynamic_chain
 proxy_dns
 tcp_read_time_out 15000
@@ -348,8 +388,7 @@ tcp_connect_time_out 8000
 # Example: Tor
 socks5 127.0.0.1 9050
 EOL
-    check_error "ProxyChains configuration"
-fi
+    fi
 
 if prompt_yes_no "Install Nerd Fonts?"; then
     log "Installing Nerd Fonts"
