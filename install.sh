@@ -79,7 +79,7 @@ log "Installing tools"
 # 2.1 Core Tools
 log "Installing core tools"
 apt install -y \
-    nmap netcat tcpdump wireshark curl wget dnsutils git \
+    nmap netcat-openbsd tcpdump wireshark curl wget bind9-dnsutils git \
     python3 python3-pip ruby perl golang make build-essential
 check_error "Core tools installation"
 
