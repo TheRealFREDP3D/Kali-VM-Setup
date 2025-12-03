@@ -11,8 +11,34 @@
 LOG_FILE="/root/ctf_setup.log"
 TOOLS_DIR="/root/tools"
 CTF_DIR="/root/CTF"
-GHIDRA_VERSION="11.0.2_PUBLIC_20240503"
 KALI_USER="kali"  # Default Kali user; adjust if changed
+
+# Function to prompt for target user directory
+prompt_target_user() {
+    while true; do
+        read -p "Which user directory should tools be installed in? [kali]: " target_user
+        target_user=${target_user:-kali}  # Default to "kali" if empty
+        
+        # Check if user directory exists
+        if [ -d "/home/$target_user" ]; then
+            echo -e "${GREEN}Using user directory: /home/$target_user${NC}"
+            TARGET_USER="$target_user"
+            break
+        else
+            echo -e "${RED}Error: User directory /home/$target_user does not exist.${NC}"
+            if prompt_yes_no "Create user directory /home/$target_user?"; then
+                mkdir -p "/home/$target_user"
+                if [ $? -eq 0 ]; then
+                    echo -e "${GREEN}Created user directory: /home/$target_user${NC}"
+                    TARGET_USER="$target_user"
+                    break
+                else
+                    echo -e "${RED}Failed to create user directory${NC}"
+                fi
+            fi
+        fi
+    done
+}
 
 # Colors for output
 RED='\033[0;31m'
@@ -25,12 +51,27 @@ log() {
     echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
+# Track failures and continue on error
+FAILED_STEPS=()
+
+# Record a failure explicitly (useful with `|| record_failure "Step"`)
+record_failure() {
+    local msg="$1"
+    log "${RED}Error: ${msg} failed. Continuing...${NC}"
+    FAILED_STEPS+=("$msg")
+    return 1
+}
+
 # Function to check if command executed successfully
 check_error() {
-    if [ $? -ne 0 ]; then
-        log "${RED}Error: $1 failed${NC}"
-        exit 1
+    local status=$?
+    local msg="$1"
+    if [ $status -ne 0 ]; then
+        log "${RED}Error: ${msg} failed (exit ${status}). Continuing...${NC}"
+        FAILED_STEPS+=("$msg")
+        return 1
     fi
+    return 0
 }
 
 # Function to prompt user for confirmation
@@ -50,6 +91,9 @@ echo -e "${GREEN}============================================================${N
 echo -e "${GREEN}Kali Linux CTF VM Setup Script${NC}"
 echo -e "${GREEN}============================================================${NC}"
 log "Starting CTF VM setup"
+
+# Prompt for target user directory
+prompt_target_user
 
 # Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
@@ -79,7 +123,7 @@ log "Installing tools"
 # 2.1 Core Tools
 log "Installing core tools"
 apt install -y \
-    nmap netcat tcpdump wireshark curl wget dnsutils git \
+    nmap netcat-traditional tcpdump wireshark curl wget bind9-dnsutils git \
     python3 python3-pip ruby perl golang make build-essential
 check_error "Core tools installation"
 
@@ -95,28 +139,16 @@ fi
 if prompt_yes_no "Install web exploitation tools (burpsuite, sqlmap, wfuzz, etc.)?"; then
     log "Installing web exploitation tools"
     apt install -y \
-        burpsuite zaproxy wfuzz sqlmap xsssniper wafw00f
+        burpsuite zaproxy wfuzz sqlmap wafw00f
     check_error "Web tools installation"
 fi
 
 # 2.4 Reverse Engineering & Binary Exploitation
-if prompt_yes_no "Install reverse engineering tools (ghidra, radare2, gdb, etc.)?"; then
+if prompt_yes_no "Install reverse engineering tools (radare2, gdb, etc.)?"; then
     log "Installing reverse engineering tools"
     apt install -y \
-        radare2 gdb peda binwalk apktool dex2jar jd-gui
+        radare2 gdb binwalk apktool dex2jar jd-gui
     check_error "Reverse engineering tools installation"
-
-    # Install Ghidra
-    log "Installing Ghidra"
-    apt install -y openjdk-17-jre
-    check_error "Java installation"
-    mkdir -p "$TOOLS_DIR"
-    cd "$TOOLS_DIR" || check_error "Change to tools directory"
-    wget "https://github.com/NationalSecurityAgency/ghidra/releases/download/GHIDRA_${GHIDRA_VERSION}/ghidra_${GHIDRA_VERSION}.zip" -O ghidra.zip
-    check_error "Ghidra download"
-    unzip -o ghidra.zip
-    check_error "Ghidra unzip"
-    rm ghidra.zip
 fi
 
 # 2.5 Forensics
@@ -139,33 +171,37 @@ fi
 if prompt_yes_no "Install exploit development tools (metasploit, pwntools, etc.)?"; then
     log "Installing exploit development tools"
     apt install -y \
-        metasploit-framework exploitdb pwntools ropper
+        metasploit-framework exploitdb ropper
     check_error "Exploit development tools installation"
 fi
 
 # 2.8 Python Environment
 log "Setting up Python virtual environment"
-python3 -m venv "$CTF_DIR/venv"
+python3 -m venv "/home/$TARGET_USER/CTF/venv"
 check_error "Virtual environment creation"
-source "$CTF_DIR/venv/bin/activate"
+source "/home/$TARGET_USER/CTF/venv/bin/activate"
 pip install --upgrade pip
 pip install pwntools requests flask r2pipe pillow
 check_error "Python packages installation"
 deactivate
 
 # 2.9 Additional Downloads
-log "Downloading SecLists"
-git clone https://github.com/danielmiessler/SecLists.git "$TOOLS_DIR/SecLists" || { log "${RED}Error: SecLists clone failed${NC}"; exit 1; }
+if prompt_yes_no "Install SecLists? WARNING: This is a very large download (~2GB) containing extensive wordlists and payloads. Skip if you have limited bandwidth or storage space."; then
+    log "Downloading SecLists"
+    git clone https://github.com/danielmiessler/SecLists.git "/home/$TARGET_USER/tools/SecLists" || record_failure "SecLists clone"
+else
+    log "Skipping SecLists installation"
+fi
 
 # 3. Directory Structure
 log "Creating CTF directory structure"
-mkdir -p "$CTF_DIR"/{tools,notes,binaries,web,reversing,pwn,crypto,forensics,writeups}
+mkdir -p "/home/$TARGET_USER/CTF"/{tools,notes,binaries,web,reversing,pwn,crypto,forensics,writeups}
 check_error "Directory creation"
 
 # Initialize Git for notes
 log "Initializing Git for notes"
-if [ ! -d "$CTF_DIR/notes/.git" ]; then
-    cd "$CTF_DIR/notes" || check_error "Change to notes directory"
+if [ ! -d "/home/$TARGET_USER/CTF/notes/.git" ]; then
+    cd "/home/$TARGET_USER/CTF/notes" || check_error "Change to notes directory"
     git init
     touch notes.md cheatsheet.md
     cat <<EOL > cheatsheet.md
@@ -192,7 +228,7 @@ fi
 
 # 4. Aliases and Bash Settings
 log "Configuring bash aliases"
-cat <<EOL >> "/home/$KALI_USER/.bashrc"
+cat <<EOL >> "/home/$TARGET_USER/.bashrc"
 # CTF Aliases
 alias ..='cd ..'
 alias ...='cd ../..'
@@ -228,12 +264,12 @@ extract () {
 }
 EOL
 check_error "Bash aliases configuration"
-source "/home/$KALI_USER/.bashrc"
+source "/home/$TARGET_USER/.bashrc"
 
 # 5. Config Tweaks
 if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only in isolated VMs)?"; then
     log "Enabling passwordless sudo"
-    echo "$KALI_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/kali
+    echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/kali
     chmod 0440 /etc/sudoers.d/kali
     check_error "Passwordless sudo configuration"
 fi
@@ -273,7 +309,7 @@ if prompt_yes_no "Install test environments (DVWA, Vulnix, CTF write-ups)?"; the
     check_error "DVWA pull"
     apt install -y vulnix
     check_error "Vulnix installation"
-    git clone https://github.com/ctfs/write-ups-2014 "$CTF_DIR/writeups"
+    git clone https://github.com/ctfs/write-ups-2014 "/home/$TARGET_USER/CTF/writeups"
     check_error "CTF write-ups clone"
 fi
 
@@ -281,9 +317,9 @@ fi
 log "Performing cleanup"
 apt autoremove -y
 apt clean
-rm -rf "/home/$KALI_USER/.cache/*" "$TOOLS_DIR/*.zip"
+rm -rf "/home/$TARGET_USER/.cache/*" "/home/$TARGET_USER/tools/*.zip"
 history -c
-rm -rf "/home/$KALI_USER/.bash_history"
+rm -rf "/home/$TARGET_USER/.bash_history"
 check_error "Cleanup"
 
 # 9. Optional Extras
@@ -291,11 +327,11 @@ if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
     log "Installing Zsh and Oh My Zsh"
     apt install -y zsh
     check_error "Zsh installation"
-    su - "$KALI_USER" -c "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
-    su - "$KALI_USER" -c "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/plugins/zsh-autosuggestions"
-    su - "$KALI_USER" -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/plugins/zsh-syntax-highlighting"
-    echo "plugins=(git zsh-autosuggestions zsh-syntax-highlighting)" >> "/home/$KALI_USER/.zshrc"
-    chsh -s /bin/zsh "$KALI_USER"
+    su - "$TARGET_USER" -c "sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
+    su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/plugins/zsh-autosuggestions"
+    su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/plugins/zsh-syntax-highlighting"
+    echo "plugins=(git zsh-autosuggestions zsh-syntax-highlighting)" >> "/home/$TARGET_USER/.zshrc"
+    chsh -s /bin/zsh "$TARGET_USER"
     check_error "Zsh configuration"
 fi
 
@@ -317,13 +353,13 @@ fi
 
 if prompt_yes_no "Install Nerd Fonts?"; then
     log "Installing Nerd Fonts"
-    mkdir -p "/home/$KALI_USER/.fonts"
-    wget -P "/home/$KALI_USER/.fonts" https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/Hack.zip
-    unzip "/home/$KALI_USER/.fonts/Hack.zip" -d "/home/$KALI_USER/.fonts/Hack"
+    mkdir -p "/home/$TARGET_USER/.fonts"
+    wget -P "/home/$TARGET_USER/.fonts" https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/Hack.zip
+    unzip "/home/$TARGET_USER/.fonts/Hack.zip" -d "/home/$TARGET_USER/.fonts/Hack"
     fc-cache -fv
-    rm "/home/$KALI_USER/.fonts/Hack.zip"
+    rm "/home/$TARGET_USER/.fonts/Hack.zip"
     check_error "Nerd Fonts installation"
-    chown -R "$KALI_USER:$KALI_USER" "/home/$KALI_USER/.fonts"
+    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/.fonts"
 fi
 
 # 10. Verification
@@ -333,13 +369,29 @@ ip a >> "$LOG_FILE"
 ufw status >> "$LOG_FILE"
 nmap --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}Nmap verification failed${NC}"
 burpsuite --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}Burp Suite verification failed${NC}"
-"$TOOLS_DIR/ghidra_${GHIDRA_VERSION%_*}/ghidraRun" --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}Ghidra verification failed${NC}"
 sqlmap --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}SQLMap verification failed${NC}"
 john --version >> "$LOG_FILE" 2>&1 || log "${YELLOW}John verification failed${NC}"
-ls "$TOOLS_DIR/SecLists/Passwords" >> "$LOG_FILE" 2>&1 || log "${YELLOW}SecLists verification failed${NC}"
+ls "/home/$TARGET_USER/tools/SecLists/Passwords" >> "$LOG_FILE" 2>&1 || log "${YELLOW}SecLists verification failed${NC}"
+
+# Summary of failures
+if [ ${#FAILED_STEPS[@]} -gt 0 ]; then
+    echo -e "${RED}============================================================${NC}"
+    log "${RED}Completed with failures. The following steps failed:${NC}"
+    for step in "${FAILED_STEPS[@]}"; do
+        log " - $step"
+    done
+    echo -e "${RED}============================================================${NC}"
+    FINAL_EXIT=1
+else
+    FINAL_EXIT=0
+fi
 
 # Final Instructions
-log "${GREEN}Setup complete!${NC}"
+if [ $FINAL_EXIT -eq 0 ]; then
+    log "${GREEN}Setup complete!${NC}"
+else
+    log "${YELLOW}Setup completed with some failures. See $LOG_FILE for details.${NC}"
+fi
 echo -e "${GREEN}============================================================${NC}"
 echo -e "${GREEN}Next Steps:${NC}"
 echo -e "1. Shut down the VM and take a snapshot named 'CTF Base'."
@@ -349,4 +401,4 @@ echo -e "4. Check $LOG_FILE for details."
 echo -e "${GREEN}Happy Hacking!${NC}"
 echo -e "${GREEN}============================================================${NC}"
 
-exit 0
+exit $FINAL_EXIT
