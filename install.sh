@@ -9,8 +9,8 @@
 
 # Configuration
 LOG_FILE="/root/ctf_setup.log"
-TOOLS_DIR="/root/tools"
-CTF_DIR="/root/CTF"
+TOOLS_DIR="/home/$TARGET_USER/tools"
+CTF_DIR="/home/$TARGET_USER/CTF"
 KALI_USER="kali"  # Default Kali user; adjust if changed
 
 # Function to prompt for target user directory
@@ -110,15 +110,14 @@ echo -e "${GREEN}============================================================${N
 echo -e "${GREEN}Kali Linux CTF VM Setup Script${NC}"
 echo -e "${GREEN}============================================================${NC}"
 log "Starting CTF VM setup"
-
-# Prompt for target user directory
-prompt_target_user
-
-# Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
     log "${RED}This script must be run as root (use sudo)${NC}"
     exit 1
 fi
+
+# Prompt for target user directory
+prompt_target_user
+
 
 # Initialize log file
 echo -e "Kali Linux CTF VM Setup Log\n" > "$LOG_FILE"
@@ -126,6 +125,7 @@ echo -e "Kali Linux CTF VM Setup Log\n" > "$LOG_FILE"
 # Update system
 log "Updating system"
 apt update && apt upgrade -y
+check_error "System update and upgrade"
 
 # 1. Base VM Setup (Networking check)
 log "Checking network configuration"
@@ -197,25 +197,25 @@ fi
 # Create CTF directory first
 log "Creating CTF directory structure"
 mkdir -p "/home/$TARGET_USER/CTF"
+chown "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/CTF"
 check_error "CTF directory creation"
 
 log "Setting up Python virtual environment"
-python3 -m venv "/home/$TARGET_USER/CTF/venv"
+su - "$TARGET_USER" -c "python3 -m venv ~/CTF/venv"
 check_error "Virtual environment creation"
-source "/home/$TARGET_USER/CTF/venv/bin/activate"
-pip install --upgrade pip
-pip install pwntools requests flask r2pipe pillow
+su - "$TARGET_USER" -c "source ~/CTF/venv/bin/activate && pip install --upgrade pip && pip install pwntools requests flask r2pipe pillow"
 check_error "Python packages installation"
-deactivate
 
 # 2.9 Additional Downloads
 # Create tools directory first
 mkdir -p "/home/$TARGET_USER/tools"
+chown "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/tools"
 check_error "Tools directory creation"
 
 if prompt_yes_no "Install SecLists? WARNING: This is a very large download (~2GB) containing extensive wordlists and payloads. Skip if you have limited bandwidth or storage space."; then
     log "Downloading SecLists"
-    git clone https://github.com/danielmiessler/SecLists.git "/home/$TARGET_USER/tools/SecLists" || record_failure "SecLists clone"
+    su - "$TARGET_USER" -c "git clone https://github.com/danielmiessler/SecLists.git ~/tools/SecLists" || record_failure "SecLists clone"
+    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/tools/SecLists"
 else
     log "Skipping SecLists installation"
 fi
@@ -223,15 +223,14 @@ fi
 # 3. Directory Structure
 log "Creating CTF subdirectories"
 mkdir -p "/home/$TARGET_USER/CTF"/{tools,notes,binaries,web,reversing,pwn,crypto,forensics,writeups}
+chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/CTF"
 check_error "CTF subdirectories creation"
 
 # Initialize Git for notes
 log "Initializing Git for notes"
 if [ ! -d "/home/$TARGET_USER/CTF/notes/.git" ]; then
-    cd "/home/$TARGET_USER/CTF/notes" || check_error "Change to notes directory"
-    git init
-    touch notes.md cheatsheet.md
-    cat <<EOL > cheatsheet.md
+    su - "$TARGET_USER" -c "cd ~/CTF/notes && git init && touch notes.md cheatsheet.md"
+    cat <<EOL | su - "$TARGET_USER" -c "cat > ~/CTF/notes/cheatsheet.md"
 # CTF Cheatsheet
 
 ## Reverse Shells
@@ -246,8 +245,7 @@ if [ ! -d "/home/$TARGET_USER/CTF/notes/.git" ]; then
 - Nmap: \`nmap -sC -sV -Pn <target>\`
 - Gobuster: \`gobuster dir -u <url> -w ~/tools/SecLists/Discovery/Web-Content/common.txt\`
 EOL
-    git add .
-    git commit -m "Initial CTF notes"
+    su - "$TARGET_USER" -c "cd ~/CTF/notes && git add . && git commit -m 'Initial CTF notes'"
     check_error "Git initialization"
 else
     log "${YELLOW}Warning: Git repository already exists in notes directory. Skipping initialization.${NC}"
@@ -255,7 +253,9 @@ fi
 
 # 4. Aliases and Bash Settings
 log "Configuring bash aliases"
+if ! grep -q "# CTF Aliases" "/home/$TARGET_USER/.bashrc"; then
 cat <<EOL >> "/home/$TARGET_USER/.bashrc"
+
 # CTF Aliases
 alias ..='cd ..'
 alias ...='cd ../..'
@@ -290,6 +290,9 @@ extract () {
   fi
 }
 EOL
+else
+    log "CTF Aliases already present in .bashrc, skipping."
+fi
 check_error "Bash aliases configuration"
 
 # 5. Config Tweaks
@@ -301,8 +304,10 @@ if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only 
 fi
 
 log "Increasing file watch limits"
-echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
-sysctl -p
+if ! grep -q "fs.inotify.max_user_watches=524288" /etc/sysctl.conf; then
+    echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
+    sysctl -p
+fi
 check_error "File watch limits configuration"
 
 log "Configuring firewall"
@@ -337,19 +342,11 @@ if prompt_yes_no "Install test environments (DVWA, Vulnix, CTF write-ups)?"; the
     apt install -y vulnix
     check_error "Vulnix installation"
     git clone https://github.com/ctfs/write-ups-2014 "/home/$TARGET_USER/CTF/writeups"
+    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/CTF/writeups"
     check_error "CTF write-ups clone"
 fi
 
-# 8. Final Cleanup
-log "Performing cleanup"
-apt autoremove -y
-apt clean
-rm -rf "/home/$TARGET_USER/.cache/*" "/home/$TARGET_USER/tools/*.zip"
-history -c
-rm -rf "/home/$TARGET_USER/.bash_history"
-check_error "Cleanup"
-
-# 9. Optional Extras
+# 8. Optional Extras
 if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
     log "Installing Zsh and Oh My Zsh"
     apt install -y zsh
@@ -373,16 +370,6 @@ if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
     check_error "Zsh configuration"
 fi
 
-# 8. Final Cleanup
-log "Performing cleanup"
-apt autoremove -y
-apt clean
-rm -rf "/home/$TARGET_USER/.cache/*" "/home/$TARGET_USER/tools/*.zip"
-history -c
-rm -rf "/home/$TARGET_USER/.bash_history"
-check_error "Cleanup"
-
-# 9. Optional Extras
 if prompt_yes_no "Configure ProxyChains?"; then
     log "Configuring ProxyChains"
     apt install -y proxychains
@@ -400,15 +387,22 @@ fi
 
 if prompt_yes_no "Install Nerd Fonts?"; then
     log "Installing Nerd Fonts"
-    mkdir -p "/home/$TARGET_USER/.fonts"
-    wget -P "/home/$TARGET_USER/.fonts" https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/Hack.zip
-    unzip "/home/$TARGET_USER/.fonts/Hack.zip" -d "/home/$TARGET_USER/.fonts/Hack"
+    su - "$TARGET_USER" -c "mkdir -p ~/.fonts"
+    su - "$TARGET_USER" -c "wget -P ~/.fonts https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/Hack.zip"
+    su - "$TARGET_USER" -c "unzip ~/.fonts/Hack.zip -d ~/.fonts/Hack"
     fc-cache -fv
-    rm "/home/$TARGET_USER/.fonts/Hack.zip"
+    su - "$TARGET_USER" -c "rm ~/.fonts/Hack.zip"
     check_error "Nerd Fonts installation"
-    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/.fonts"
 fi
 
+# 9. Final Cleanup
+log "Performing cleanup"
+apt autoremove -y
+apt clean
+rm -rf "/home/$TARGET_USER/.cache/*" "/home/$TARGET_USER/tools/*.zip"
+history -c
+rm -rf "/home/$TARGET_USER/.bash_history"
+check_error "Cleanup"
 # 10. Verification
 log "Verifying setup"
 echo -e "${YELLOW}Running verification tests${NC}"
