@@ -125,7 +125,7 @@ echo -e "Kali Linux CTF VM Setup Log\n" > "$LOG_FILE"
 
 # Update system
 log "Updating system"
-apt update && apt upgrade -y
+apt update && apt upgrade -y || record_failure "System update"
 
 # 1. Base VM Setup (Networking check)
 log "Checking network configuration"
@@ -202,11 +202,9 @@ check_error "CTF directory creation"
 log "Setting up Python virtual environment"
 python3 -m venv "/home/$TARGET_USER/CTF/venv"
 check_error "Virtual environment creation"
-source "/home/$TARGET_USER/CTF/venv/bin/activate"
-pip install --upgrade pip
-pip install pwntools requests flask r2pipe pillow
+"/home/$TARGET_USER/CTF/venv/bin/python" -m pip install --upgrade pip
+"/home/$TARGET_USER/CTF/venv/bin/python" -m pip install pwntools requests flask r2pipe pillow
 check_error "Python packages installation"
-deactivate
 
 # 2.9 Additional Downloads
 # Create tools directory first
@@ -228,10 +226,11 @@ check_error "CTF subdirectories creation"
 # Initialize Git for notes
 log "Initializing Git for notes"
 if [ ! -d "/home/$TARGET_USER/CTF/notes/.git" ]; then
-    cd "/home/$TARGET_USER/CTF/notes" || check_error "Change to notes directory"
-    git init
-    touch notes.md cheatsheet.md
-    cat <<EOL > cheatsheet.md
+    (
+        cd "/home/$TARGET_USER/CTF/notes" || exit 1
+        git init
+        touch notes.md cheatsheet.md
+        cat <<EOL > cheatsheet.md
 # CTF Cheatsheet
 
 ## Reverse Shells
@@ -246,8 +245,10 @@ if [ ! -d "/home/$TARGET_USER/CTF/notes/.git" ]; then
 - Nmap: \`nmap -sC -sV -Pn <target>\`
 - Gobuster: \`gobuster dir -u <url> -w ~/tools/SecLists/Discovery/Web-Content/common.txt\`
 EOL
-    git add .
-    git commit -m "Initial CTF notes"
+        git add .
+        git commit -m "Initial CTF notes"
+    )
+    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/CTF/notes"
     check_error "Git initialization"
 else
     log "${YELLOW}Warning: Git repository already exists in notes directory. Skipping initialization.${NC}"
@@ -295,14 +296,14 @@ check_error "Bash aliases configuration"
 # 5. Config Tweaks
 if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only in isolated VMs)?"; then
     log "Enabling passwordless sudo"
-    echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/kali
-    chmod 0440 /etc/sudoers.d/kali
+    echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/$TARGET_USER"
+    chmod 0440 "/etc/sudoers.d/$TARGET_USER"
     check_error "Passwordless sudo configuration"
 fi
 
 log "Increasing file watch limits"
-echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
-sysctl -p
+grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf || echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
+sysctl -w fs.inotify.max_user_watches=524288 >/dev/null
 check_error "File watch limits configuration"
 
 log "Configuring firewall"
@@ -310,7 +311,7 @@ apt install -y ufw
 ufw allow out http
 ufw allow out https
 ufw allow out domain
-ufw enable
+yes | ufw enable
 check_error "Firewall configuration"
 systemctl disable bluetooth 2>/dev/null || true
 systemctl disable cups 2>/dev/null || true
@@ -340,23 +341,13 @@ if prompt_yes_no "Install test environments (DVWA, Vulnix, CTF write-ups)?"; the
     check_error "CTF write-ups clone"
 fi
 
-# 8. Final Cleanup
-log "Performing cleanup"
-apt autoremove -y
-apt clean
-rm -rf "/home/$TARGET_USER/.cache/*" "/home/$TARGET_USER/tools/*.zip"
-history -c
-rm -rf "/home/$TARGET_USER/.bash_history"
-check_error "Cleanup"
-
-# 9. Optional Extras
+# 8. Optional Extras
 if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
     log "Installing Zsh and Oh My Zsh"
     apt install -y zsh
     check_error "Zsh installation"
     
     # Securely download and run the Oh My Zsh installer
-    local oh_my_zsh_install_script
     oh_my_zsh_install_script=$(mktemp)
     if curl -fsSL "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" -o "$oh_my_zsh_install_script"; then
         su - "$TARGET_USER" -c "sh '$oh_my_zsh_install_script' --unattended" || record_failure "Oh My Zsh installation"
@@ -373,16 +364,6 @@ if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
     check_error "Zsh configuration"
 fi
 
-# 8. Final Cleanup
-log "Performing cleanup"
-apt autoremove -y
-apt clean
-rm -rf "/home/$TARGET_USER/.cache/*" "/home/$TARGET_USER/tools/*.zip"
-history -c
-rm -rf "/home/$TARGET_USER/.bash_history"
-check_error "Cleanup"
-
-# 9. Optional Extras
 if prompt_yes_no "Configure ProxyChains?"; then
     log "Configuring ProxyChains"
     apt install -y proxychains
@@ -408,6 +389,15 @@ if prompt_yes_no "Install Nerd Fonts?"; then
     check_error "Nerd Fonts installation"
     chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/.fonts"
 fi
+
+# 9. Final Cleanup
+log "Performing cleanup"
+apt autoremove -y
+apt clean
+rm -rf "/home/$TARGET_USER/.cache/"* "/home/$TARGET_USER/tools/"*.zip
+history -c
+rm -rf "/home/$TARGET_USER/.bash_history"
+check_error "Cleanup"
 
 # 10. Verification
 log "Verifying setup"
