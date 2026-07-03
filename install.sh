@@ -19,12 +19,18 @@ prompt_target_user() {
         read -p "Which user directory should tools be installed in? [kali]: " target_user
         target_user=${target_user:-kali}  # Default to "kali" if empty
         
-        # Sanitize user input to prevent path traversal
-        if [[ "$target_user" =~ / ]]; then
-            echo -e "${RED}Error: Username cannot contain '/' characters.${NC}"
+        # Validate username format (POSIX-safe: lowercase, digits, _, -, must start with letter/_)
+        if [[ ! "$target_user" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+            echo -e "${RED}Error: Invalid username '$target_user'. Must match ^[a-z_][a-z0-9_-]*$.${NC}"
             continue
         fi
-        
+
+        # Check if user actually exists on the system
+        if ! id -u "$target_user" >/dev/null 2>&1; then
+            echo -e "${RED}Error: User '$target_user' does not exist on this system.${NC}"
+            continue
+        fi
+
         # Check if user directory exists
         if [ -d "/home/$target_user" ]; then
             echo -e "${GREEN}Using user directory: /home/$target_user${NC}"
@@ -248,8 +254,12 @@ EOL
         git add .
         git commit -m "Initial CTF notes"
     )
+    git_status=$?
     chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/CTF/notes"
-    check_error "Git initialization"
+    if [ $git_status -ne 0 ]; then
+        log "${RED}Error: Git initialization failed (exit ${git_status}). Continuing...${NC}"
+        FAILED_STEPS+=("Git initialization")
+    fi
 else
     log "${YELLOW}Warning: Git repository already exists in notes directory. Skipping initialization.${NC}"
 fi
@@ -298,7 +308,13 @@ if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only 
     log "Enabling passwordless sudo"
     echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/$TARGET_USER"
     chmod 0440 "/etc/sudoers.d/$TARGET_USER"
-    check_error "Passwordless sudo configuration"
+    if visudo -c -f "/etc/sudoers.d/$TARGET_USER" 2>/dev/null; then
+        check_error "Passwordless sudo configuration"
+    else
+        log "${RED}Error: Sudoers file validation failed. Removing invalid file.${NC}"
+        rm -f "/etc/sudoers.d/$TARGET_USER"
+        FAILED_STEPS+=("Passwordless sudo configuration")
+    fi
 fi
 
 log "Increasing file watch limits"
