@@ -311,7 +311,7 @@ apt install -y ufw
 ufw allow out http
 ufw allow out https
 ufw allow out domain
-yes | ufw enable
+ufw --force enable
 check_error "Firewall configuration"
 systemctl disable bluetooth 2>/dev/null || true
 systemctl disable cups 2>/dev/null || true
