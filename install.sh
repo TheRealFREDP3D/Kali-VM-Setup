@@ -302,8 +302,8 @@ if prompt_yes_no "Enable passwordless sudo (WARNING: Reduces security, use only 
 fi
 
 log "Increasing file watch limits"
-grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf || echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
-sysctl -w fs.inotify.max_user_watches=524288 >/dev/null
+echo "fs.inotify.max_user_watches=524288" > /etc/sysctl.d/99-ctf.conf
+sysctl -p /etc/sysctl.d/99-ctf.conf >/dev/null
 check_error "File watch limits configuration"
 
 log "Configuring firewall"
