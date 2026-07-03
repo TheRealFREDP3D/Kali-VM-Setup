@@ -208,9 +208,8 @@ check_error "CTF directory creation"
 log "Setting up Python virtual environment"
 python3 -m venv "/home/$TARGET_USER/CTF/venv"
 check_error "Virtual environment creation"
-"/home/$TARGET_USER/CTF/venv/bin/python" -m pip install --upgrade pip
-"/home/$TARGET_USER/CTF/venv/bin/python" -m pip install pwntools requests flask r2pipe pillow
-check_error "Python packages installation"
+"/home/$TARGET_USER/CTF/venv/bin/python" -m pip install --upgrade pip || record_failure "pip upgrade"
+"/home/$TARGET_USER/CTF/venv/bin/python" -m pip install pwntools requests flask r2pipe pillow || record_failure "pip packages"
 
 # 2.9 Additional Downloads
 # Create tools directory first
