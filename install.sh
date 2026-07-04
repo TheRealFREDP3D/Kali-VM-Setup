@@ -254,7 +254,7 @@ EOL
         git commit -m "Initial CTF notes"
     )
     git_status=$?
-    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/CTF/notes"
+    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/CTF/notes" 2>/dev/null || true
     if [ $git_status -ne 0 ]; then
         log "${RED}Error: Git initialization failed (exit ${git_status}). Continuing...${NC}"
         FAILED_STEPS+=("Git initialization")
@@ -375,8 +375,8 @@ if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
         rm -f "$oh_my_zsh_install_script"
     fi
     
-    su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/plugins/zsh-autosuggestions"
-    su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/plugins/zsh-syntax-highlighting"
+    su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/plugins/zsh-autosuggestions" || record_failure "zsh-autosuggestions clone"
+    su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/plugins/zsh-syntax-highlighting" || record_failure "zsh-syntax-highlighting clone"
     # Use sed to avoid duplicate entries if the script is re-run
     su - "$TARGET_USER" -c "sed -i '/^plugins=/c\plugins=(git zsh-autosuggestions zsh-syntax-highlighting)' ~/.zshrc"
     chsh -s /bin/zsh "$TARGET_USER"
@@ -401,8 +401,8 @@ fi
 if prompt_yes_no "Install Nerd Fonts?"; then
     log "Installing Nerd Fonts"
     mkdir -p "/home/$TARGET_USER/.fonts"
-    wget -P "/home/$TARGET_USER/.fonts" https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/Hack.zip
-    unzip "/home/$TARGET_USER/.fonts/Hack.zip" -d "/home/$TARGET_USER/.fonts/Hack"
+    wget -P "/home/$TARGET_USER/.fonts" https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/Hack.zip || record_failure "Nerd Fonts download"
+    unzip "/home/$TARGET_USER/.fonts/Hack.zip" -d "/home/$TARGET_USER/.fonts/Hack" || record_failure "Nerd Fonts unzip"
     fc-cache -fv
     rm "/home/$TARGET_USER/.fonts/Hack.zip"
     check_error "Nerd Fonts installation"
@@ -413,7 +413,7 @@ fi
 log "Performing cleanup"
 apt autoremove -y
 apt clean
-rm -rf "/home/$TARGET_USER/.cache/"* "/home/$TARGET_USER/tools/"*.zip
+rm -rf "/home/$TARGET_USER/.cache" "/home/$TARGET_USER/tools/"*.zip
 history -c
 rm -rf "/home/$TARGET_USER/.bash_history"
 check_error "Cleanup"
