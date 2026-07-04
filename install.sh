@@ -364,12 +364,16 @@ if prompt_yes_no "Install Zsh and Oh My Zsh?"; then
     
     # Securely download and run the Oh My Zsh installer
     oh_my_zsh_install_script=$(mktemp)
-    if curl -fsSL "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" -o "$oh_my_zsh_install_script"; then
-        su - "$TARGET_USER" -c "sh '$oh_my_zsh_install_script' --unattended" || record_failure "Oh My Zsh installation"
+    if [ -z "$oh_my_zsh_install_script" ] || [ ! -f "$oh_my_zsh_install_script" ]; then
+        record_failure "Oh My Zsh (mktemp failed)"
     else
-        record_failure "Oh My Zsh download"
+        if curl -fsSL "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" -o "$oh_my_zsh_install_script"; then
+            su - "$TARGET_USER" -c "sh '$oh_my_zsh_install_script' --unattended" || record_failure "Oh My Zsh installation"
+        else
+            record_failure "Oh My Zsh download"
+        fi
+        rm -f "$oh_my_zsh_install_script"
     fi
-    rm -f "$oh_my_zsh_install_script"
     
     su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/plugins/zsh-autosuggestions"
     su - "$TARGET_USER" -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/plugins/zsh-syntax-highlighting"
